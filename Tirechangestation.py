@@ -40,7 +40,7 @@ def customer(env, customer_id, tire_station, max_wait_time):
             yield env.process(tire_station.change_tires(customer_id))
             operation_time = env.now - start_operation_time
             operation_times.append(operation_time)
-            total_customers += 1  # Increment the total customers served
+            total_customers += 1  # Increment 
         else:
             # Customer leaves due to long wait time
             turnaways += 1
@@ -66,7 +66,7 @@ def run_simulation(sim_time, num_employees, tire_change_time, arrival_rate, max_
 # Number of repetitions for each scenario
 num_repetitions = 5
 
-# Run and visualize results for both scenarios (1 and 2 employees)
+
 for employees in [1, 2]:
     total_turnaways = 0
     total_waiting_times = []
@@ -86,14 +86,14 @@ for employees in [1, 2]:
     avg_waiting_time = sum(total_waiting_times) / len(total_waiting_times) if total_waiting_times else 0
     avg_operation_time = sum(total_operation_times) / len(total_operation_times) if total_operation_times else 0
 
-    # Print the results
+    
     print(f"\nRunning simulation with {employees} employee(s):")
     print(f"Total Turnaways: {total_turnaways}")
     print(f"Average waiting time: {avg_waiting_time:.2f} minutes")
     print(f"Average operation time: {avg_operation_time:.2f} minutes")
     print(f"Total customers arrived in this scenario: {total_customers_arrived}")
 
-    # Visualization code with updated figure size and subplot arrangement
+    # Visualization 
     plt.figure(figsize=(8, 4))
 
     # Plot the distribution of waiting times
