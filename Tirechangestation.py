@@ -1,128 +1,152 @@
 import simpy
 import random
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
 
-# Constants
-SIM_TIME = 180         # Total simulation time in minutes
-TIRE_CHANGE_TIME = 5  # Average time to change tires (minutes)
-ARRIVAL_RATE = 3     # Average arrival rate (customers per minute)
-MAX_WAIT_TIME = 5      # Maximum time a customer can wait before leaving
+# Funktion för att omvandla minuter till klockslag (används för att visa x-axeln i timmar)
+def time_formatter(x, pos):
+    hours = int(x // 60) + 6  # Startar från 06:00
+    return f"{hours:02d}:00"
 
-# Data Collection
-waiting_times = []      # List of waiting times for each customer
-operation_times = []    # List of operation times (tire change) for each customer
-turnaways = 0           # Count of customers who couldn't wait and left
-total_customers = 0     # Total customers served
+# Konstanter
+SIM_TIME = 600  # Total simuleringstid i minuter (10 timmar från 06:00 till 16:00)
+TIRE_CHANGE_TIME = 8
+RUSH_HOUR_RATE = 5  # Ankomstfrekvens under rusningstid (kunder per minut)
+NORMAL_RATE = 3     # Ankomstfrekvens under vanliga tider (kunder per minut)
+RUSH_HOUR_START = 300  # Starttid för rusningstid i minuter (11:00)
+RUSH_HOUR_END = 360    # Sluttid för rusningstid i minuter (12:00)
+MAX_WAIT_TIME = 5
+
+# Global data collection lists
+waiting_times = []
+operation_times = []
+queue_lengths = []
+resource_utilization = []
+turnaways = 0
+total_customers = 0
+rush_queue_lengths = []
+rush_resource_utilization = []
 
 class TireStation:
     def __init__(self, env, num_employees, tire_change_time):
         self.env = env
-        # Resource for the number of employees available for tire changes
         self.num_employees = simpy.Resource(env, num_employees)
         self.tire_change_time = tire_change_time
 
     def change_tires(self, customer):
-        """Process for changing tires."""
         yield self.env.timeout(random.expovariate(1.0 / self.tire_change_time))
 
 def customer(env, customer_id, tire_station, max_wait_time):
-    """Customer process: arrives, waits, and may leave if wait is too long."""
     global turnaways, total_customers
     arrival_time = env.now
     with tire_station.num_employees.request() as request:
-        # Wait for an available employee or time out if the wait is too long
         result = yield request | env.timeout(max_wait_time)
         if request in result:
-            # Customer begins tire change
             wait_time = env.now - arrival_time
             waiting_times.append(wait_time)
             start_operation_time = env.now
             yield env.process(tire_station.change_tires(customer_id))
             operation_time = env.now - start_operation_time
             operation_times.append(operation_time)
-            total_customers += 1  # Increment 
+            total_customers += 1
         else:
-            # Customer leaves due to long wait time
             turnaways += 1
 
-def setup(env, num_employees, tire_change_time, arrival_rate, max_wait_time):
-    """Sets up the tire change station and generates customers."""
+def setup(env, num_employees, tire_change_time, rush_hour_rate, normal_rate, rush_hour_start, rush_hour_end, max_wait_time):
     tire_station = TireStation(env, num_employees, tire_change_time)
     customer_id = 0
     while True:
-        yield env.timeout(random.expovariate(1.0 / arrival_rate))
-        customer_id += 1
-        env.process(customer(env, customer_id, tire_station, max_wait_time))
+        # Justera ankomstfrekvensen beroende på om det är rusningstid
+        is_rush_hour = rush_hour_start <= env.now <= rush_hour_end
+        if is_rush_hour:
+            # Introducera variation i ankomstfrekvensen under rush hour
+            arrival_variability = random.uniform(0.8, 1.2)  # ±20% variation
+            current_arrival_rate = rush_hour_rate * arrival_variability
+        else:
+            current_arrival_rate = normal_rate
+        
+        # Samla in kölängd och resursutnyttjande varje minut för att täcka hela simuleringstiden
+        queue_lengths.append(len(tire_station.num_employees.queue))
+        resource_utilization.append(tire_station.num_employees.count / tire_station.num_employees.capacity)
+        
+        if is_rush_hour:
+            rush_queue_lengths.append(len(tire_station.num_employees.queue))
+            rush_resource_utilization.append(tire_station.num_employees.count / tire_station.num_employees.capacity)
+        
+        # Vänta en minut innan nästa kund anländer (för att få kontinuerliga data)
+        yield env.timeout(1)  # Insamling av data varje minut
+        if random.random() < 1.0 / current_arrival_rate:  # Kontrollera om en kund anländer
+            customer_id += 1
+            env.process(customer(env, customer_id, tire_station, max_wait_time))
 
-def run_simulation(sim_time, num_employees, tire_change_time, arrival_rate, max_wait_time):
-    """Runs the tire change station simulation."""
-    global waiting_times, operation_times, turnaways, total_customers
-    waiting_times, operation_times, turnaways, total_customers = [], [], 0, 0
-    env = simpy.Environment()
-    env.process(setup(env, num_employees, tire_change_time, arrival_rate, max_wait_time))
-    env.run(until=sim_time)
-    return waiting_times, operation_times, turnaways, total_customers
-
-# Number of repetitions for each scenario
-num_repetitions = 5
-
-
-for employees in [1, 2]:
-    total_turnaways = 0
-    total_waiting_times = []
-    total_operation_times = []
-    total_customers_arrived = 0
-
-    for _ in range(num_repetitions):
-        waiting_times, operation_times, turnaways, customers_arrived = run_simulation(
-            SIM_TIME, employees, TIRE_CHANGE_TIME, ARRIVAL_RATE, MAX_WAIT_TIME
-        )
-        total_turnaways += turnaways
-        total_waiting_times.extend(waiting_times)
-        total_operation_times.extend(operation_times)
-        total_customers_arrived += (waiting_times.count(0) + total_customers + turnaways)  # Count all attempts
-
-    # Calculate averages
-    avg_waiting_time = sum(total_waiting_times) / len(total_waiting_times) if total_waiting_times else 0
-    avg_operation_time = sum(total_operation_times) / len(total_operation_times) if total_operation_times else 0
-
+def run_simulation(sim_time, num_employees, tire_change_time, rush_hour_rate, normal_rate, rush_hour_start, rush_hour_end, max_wait_time):
+    global waiting_times, operation_times, queue_lengths, resource_utilization, turnaways, total_customers
+    global rush_queue_lengths, rush_resource_utilization
+    # Rensa datalistor för ny körning
+    waiting_times, operation_times, queue_lengths, resource_utilization, turnaways, total_customers = [], [], [], [], 0, 0
+    rush_queue_lengths, rush_resource_utilization = [], []
     
-    print(f"\nRunning simulation with {employees} employee(s):")
-    print(f"Total Turnaways: {total_turnaways}")
-    print(f"Average waiting time: {avg_waiting_time:.2f} minutes")
-    print(f"Average operation time: {avg_operation_time:.2f} minutes")
-    print(f"Total customers arrived in this scenario: {total_customers_arrived}")
+    env = simpy.Environment()
+    env.process(setup(env, num_employees, tire_change_time, rush_hour_rate, normal_rate, rush_hour_start, rush_hour_end, max_wait_time))
+    env.run(until=sim_time)
+    return waiting_times, operation_times, queue_lengths, resource_utilization, turnaways, total_customers, rush_queue_lengths, rush_resource_utilization
 
-    # Visualization 
-    plt.figure(figsize=(8, 4))
+# Simulering för 1, 2 och 3 anställda
+for employees in [1, 2, 3]:  
+    waiting_times, operation_times, queue_lengths, resource_utilization, turnaways, total_customers, rush_queue_lengths, rush_resource_utilization = run_simulation(
+        SIM_TIME, employees, TIRE_CHANGE_TIME, RUSH_HOUR_RATE, NORMAL_RATE, RUSH_HOUR_START, RUSH_HOUR_END, MAX_WAIT_TIME
+    )
 
-    # Plot the distribution of waiting times
-    plt.subplot(2, 2, 1)
-    plt.hist(total_waiting_times, bins=10, edgecolor='black', color='#4c72b0', alpha=0.5)
-    plt.title('Distribution of Waiting Times', fontsize=10, fontweight='bold')
-    plt.xlabel('Waiting Time (minutes)', fontsize=9, fontname='Times New Roman')
-    plt.ylabel('Number of Customers', fontsize=8)
-    plt.xticks(fontsize=7)
-    plt.yticks(fontsize=7)
+    # Beräkna genomsnittliga värden för att visa i konsolen
+    avg_waiting_time = sum(waiting_times) / len(waiting_times) if waiting_times else 0
+    avg_operation_time = sum(operation_times) / len(operation_times) if operation_times else 0
+    avg_queue_length = sum(queue_lengths) / len(queue_lengths) if queue_lengths else 0
+    avg_utilization = sum(resource_utilization) / len(resource_utilization) if resource_utilization else 0
+    avg_rush_queue_length = sum(rush_queue_lengths) / len(rush_queue_lengths) if rush_queue_lengths else 0
+    avg_rush_utilization = sum(rush_resource_utilization) / len(rush_resource_utilization) if rush_resource_utilization else 0
 
-    # Plot the distribution of operation times
-    plt.subplot(2, 2, 2)
-    plt.hist(total_operation_times, bins=10, edgecolor='black', color='#55a868', alpha=0.5)
-    plt.title('Distribution of Operation Times', fontsize=10, fontweight='bold')
-    plt.xlabel('Operation Time (minutes)', fontsize=9,fontname='Times New Roman')
-    plt.ylabel('Number of Customers', fontsize=8)
-    plt.xticks(fontsize=7)
-    plt.yticks(fontsize=7)
+    # Skriv ut resultaten i terminalen
+    print(f"\nResults for {employees} employee(s):")
+    print(f"Average Waiting Time: {avg_waiting_time:.2f} mins")
+    print(f"Average Operation Time: {avg_operation_time:.2f} mins")
+    print(f"Average Queue Length: {avg_queue_length:.2f} customers")
+    print(f"Resource Utilization: {avg_utilization:.2%}")
+    print(f"Total Turnaways: {turnaways}")
+    print(f"Average Rush Hour Queue Length: {avg_rush_queue_length:.2f} customers")
+    print(f"Average Rush Hour Utilization: {avg_rush_utilization:.2%}")
 
-    # Plot the distribution of turnaways 
-    plt.subplot(2, 2, 3)
-    plt.bar(["cars"], [total_turnaways], color='#c44e52', edgecolor='black', alpha=0.7, width=0.3 )
-    plt.xlabel('Total Turnways', fontsize=10,fontweight='bold')
-    plt.ylabel('Number of Customers', fontsize=8)
-    plt.xticks(fontsize=7)
-    plt.yticks(fontsize=7)
 
-    # Show plots
+    # Visualization i en kompakt vertikal layout
+    fig, axs = plt.subplots(3, 1, figsize=(6, 8))  # Mindre figurstorlek
+    fig.subplots_adjust(hspace=0.4)  # Mindre mellanrum mellan grafer
+
+    # Första grafen - Waiting Time Distribution
+    axs[0].hist(waiting_times, bins=5, color='#4c72b0', edgecolor='black', alpha=0.7)
+    axs[0].set_title(f"Waiting Time Distribution ({employees} Employee(s))", fontsize=10, fontweight='bold')
+    axs[0].set_xlabel("Waiting Time (minutes)", fontsize=8, fontweight='bold')
+    axs[0].set_ylabel("Customers", fontsize=8, fontweight='bold')
+
+    # Andra grafen - Queue Length over Time
+    axs[1].plot(queue_lengths, color='#c44e52', linewidth=1.2)
+    axs[1].set_title(f"Queue Length over Time ({employees} Employee(s))", fontsize=10, fontweight='bold')
+    axs[1].set_xlabel("Time of Day", fontsize=8, fontweight='bold')
+    axs[1].set_ylabel("Queue Length", fontsize=8, fontweight='bold')
+    axs[1].xaxis.set_major_formatter(FuncFormatter(time_formatter))
+    axs[1].set_xlim(0, SIM_TIME)
+    axs[1].axvline(x=RUSH_HOUR_START, color='orange', linestyle='--', linewidth=1, label='Rush Hour Start')
+    axs[1].axvline(x=RUSH_HOUR_END, color='purple', linestyle='--', linewidth=1, label='Rush Hour End')
+    axs[1].legend(loc="upper right", bbox_to_anchor=(1.1, 1), fontsize="x-small")
+
+    # Tredje grafen - Resource Utilization over Time
+    axs[2].plot(resource_utilization, color='#55a868', linewidth=1.2)
+    axs[2].set_title(f"Resource Utilization over Time ({employees} Employee(s))", fontsize=10, fontweight='bold')
+    axs[2].set_xlabel("Time of Day", fontsize=8, fontweight='bold')
+    axs[2].set_ylabel("Utilization (%)", fontsize=8, fontweight='bold')
+    axs[2].xaxis.set_major_formatter(FuncFormatter(time_formatter))
+    axs[2].set_xlim(0, SIM_TIME)
+    axs[2].axvline(x=RUSH_HOUR_START, color='orange', linestyle='--', linewidth=1, label='Rush Hour Start')
+    axs[2].axvline(x=RUSH_HOUR_END, color='purple', linestyle='--', linewidth=1, label='Rush Hour End')
+    axs[2].legend(loc="upper right", bbox_to_anchor=(1.1, 1), fontsize="x-small")
+
     plt.tight_layout()
-    plt.savefig(f'performance_metrics_{employees}_employees.png', dpi=1080)
     plt.show()
