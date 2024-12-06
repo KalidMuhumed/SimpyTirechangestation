@@ -3,7 +3,7 @@ import random
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
-# Funktion för att omvandla minuter till klockslag (används för att visa x-axeln i timmar)
+
 def time_formatter(x, pos):
     hours = int(x // 60) + 6  # Startar från 06:00
     return f"{hours:02d}:00"
@@ -56,16 +56,13 @@ def setup(env, num_employees, tire_change_time, rush_hour_rate, normal_rate, rus
     tire_station = TireStation(env, num_employees, tire_change_time)
     customer_id = 0
     while True:
-        # Justera ankomstfrekvensen beroende på om det är rusningstid
         is_rush_hour = rush_hour_start <= env.now <= rush_hour_end
         if is_rush_hour:
-            # Introducera variation i ankomstfrekvensen under rush hour
             arrival_variability = random.uniform(0.8, 1.2)  # ±20% variation
             current_arrival_rate = rush_hour_rate * arrival_variability
         else:
             current_arrival_rate = normal_rate
         
-        # Samla in kölängd och resursutnyttjande varje minut för att täcka hela simuleringstiden
         queue_lengths.append(len(tire_station.num_employees.queue))
         resource_utilization.append(tire_station.num_employees.count / tire_station.num_employees.capacity)
         
@@ -73,16 +70,14 @@ def setup(env, num_employees, tire_change_time, rush_hour_rate, normal_rate, rus
             rush_queue_lengths.append(len(tire_station.num_employees.queue))
             rush_resource_utilization.append(tire_station.num_employees.count / tire_station.num_employees.capacity)
         
-        # Vänta en minut innan nästa kund anländer (för att få kontinuerliga data)
-        yield env.timeout(1)  # Insamling av data varje minut
-        if random.random() < 1.0 / current_arrival_rate:  # Kontrollera om en kund anländer
+        yield env.timeout(1)
+        if random.random() < 1.0 / current_arrival_rate:
             customer_id += 1
             env.process(customer(env, customer_id, tire_station, max_wait_time))
 
 def run_simulation(sim_time, num_employees, tire_change_time, rush_hour_rate, normal_rate, rush_hour_start, rush_hour_end, max_wait_time):
     global waiting_times, operation_times, queue_lengths, resource_utilization, turnaways, total_customers
     global rush_queue_lengths, rush_resource_utilization
-    # Rensa datalistor för ny körning
     waiting_times, operation_times, queue_lengths, resource_utilization, turnaways, total_customers = [], [], [], [], 0, 0
     rush_queue_lengths, rush_resource_utilization = [], []
     
@@ -97,57 +92,51 @@ for employees in [1, 2, 3]:
         SIM_TIME, employees, TIRE_CHANGE_TIME, RUSH_HOUR_RATE, NORMAL_RATE, RUSH_HOUR_START, RUSH_HOUR_END, MAX_WAIT_TIME
     )
 
-    # Beräkna genomsnittliga värden för att visa i konsolen
     avg_waiting_time = sum(waiting_times) / len(waiting_times) if waiting_times else 0
-    avg_operation_time = sum(operation_times) / len(operation_times) if operation_times else 0
     avg_queue_length = sum(queue_lengths) / len(queue_lengths) if queue_lengths else 0
     avg_utilization = sum(resource_utilization) / len(resource_utilization) if resource_utilization else 0
     avg_rush_queue_length = sum(rush_queue_lengths) / len(rush_queue_lengths) if rush_queue_lengths else 0
-    avg_rush_utilization = sum(rush_resource_utilization) / len(rush_resource_utilization) if rush_resource_utilization else 0
 
-    # Skriv ut resultaten i terminalen
-    print(f"\nResults for {employees} employee(s):")
-    print(f"Average Waiting Time: {avg_waiting_time:.2f} mins")
-    print(f"Average Operation Time: {avg_operation_time:.2f} mins")
-    print(f"Average Queue Length: {avg_queue_length:.2f} customers")
-    print(f"Resource Utilization: {avg_utilization:.2%}")
-    print(f"Total Turnaways: {turnaways}")
-    print(f"Average Rush Hour Queue Length: {avg_rush_queue_length:.2f} customers")
-    print(f"Average Rush Hour Utilization: {avg_rush_utilization:.2%}")
+    print("\nSimulation Metrics:")
+    print(f"- Employees: {employees}")
+    print(f"- Avg Waiting Time: {avg_waiting_time:.2f} mins")
+    print(f"- Avg Queue Length: {avg_queue_length:.2f}")
+    print(f"- Utilization: {avg_utilization:.2%}")
+    print(f"- Total Turnaways: {turnaways}")
+    print(f"- Avg Rush Hour Queue: {avg_rush_queue_length:.2f}")
 
+            
+        # Visualization for each employee case
+    fig, axs = plt.subplots(2, 1, figsize=(5, 6))  # Smaller and compact figure size
+    fig.subplots_adjust(hspace=0.3)  # Reduce vertical space between graphs
 
-    # Visualization i en kompakt vertikal layout
-    fig, axs = plt.subplots(3, 1, figsize=(6, 8))  # Mindre figurstorlek
-    fig.subplots_adjust(hspace=0.4)  # Mindre mellanrum mellan grafer
+    # Queue Length Over Time
+    axs[0].plot(queue_lengths, color='#c44e52', linewidth=1.2)
+    axs[0].set_title(f"Queue Length Over Time (Employees: {employees})", fontsize=12, fontweight='bold')  # Bold title
+    axs[0].set_xlabel("Time (minutes)", fontsize=10, fontweight='bold')  # Bold x-axis label
+    axs[0].set_ylabel("Queue Length", fontsize=10, fontweight='bold')  # Bold y-axis label
+    axs[0].xaxis.set_major_formatter(FuncFormatter(time_formatter))
+    axs[0].tick_params(axis='both', labelsize=10)  # Larger tick labels
+    axs[0].axvline(x=RUSH_HOUR_START, color='orange', linestyle='--', linewidth=1, label='Rush Start')  # Vertical line for Rush Start
+    axs[0].axvline(x=RUSH_HOUR_END, color='purple', linestyle='--', linewidth=1, label='Rush End')  # Vertical line for Rush End
+    axs[0].legend(loc="upper right", fontsize=8)  # Simple legend with only the labels
 
-    # Första grafen - Waiting Time Distribution
-    axs[0].hist(waiting_times, bins=5, color='#4c72b0', edgecolor='black', alpha=0.7)
-    axs[0].set_title(f"Waiting Time Distribution ({employees} Employee(s))", fontsize=10, fontweight='bold')
-    axs[0].set_xlabel("Waiting Time (minutes)", fontsize=8, fontweight='bold')
-    axs[0].set_ylabel("Customers", fontsize=8, fontweight='bold')
-
-    # Andra grafen - Queue Length over Time
-    axs[1].plot(queue_lengths, color='#c44e52', linewidth=1.2)
-    axs[1].set_title(f"Queue Length over Time ({employees} Employee(s))", fontsize=10, fontweight='bold')
-    axs[1].set_xlabel("Time of Day", fontsize=8, fontweight='bold')
-    axs[1].set_ylabel("Queue Length", fontsize=8, fontweight='bold')
+    # Resource Utilization Over Time
+    axs[1].plot(resource_utilization, color='#55a868', linewidth=1.2)
+    axs[1].set_title(f"Resource Utilization Over Time (Employees: {employees})", fontsize=12, fontweight='bold')  # Bold title
+    axs[1].set_xlabel("Time (minutes)", fontsize=10, fontweight='bold')  # Bold x-axis label
+    axs[1].set_ylabel("Utilization (%)", fontsize=10, fontweight='bold')  # Bold y-axis label
     axs[1].xaxis.set_major_formatter(FuncFormatter(time_formatter))
-    axs[1].set_xlim(0, SIM_TIME)
-    axs[1].axvline(x=RUSH_HOUR_START, color='orange', linestyle='--', linewidth=1, label='Rush Hour Start')
-    axs[1].axvline(x=RUSH_HOUR_END, color='purple', linestyle='--', linewidth=1, label='Rush Hour End')
-    axs[1].legend(loc="upper right", bbox_to_anchor=(1.1, 1), fontsize="x-small")
-
-    # Tredje grafen - Resource Utilization over Time
-    axs[2].plot(resource_utilization, color='#55a868', linewidth=1.2)
-    axs[2].set_title(f"Resource Utilization over Time ({employees} Employee(s))", fontsize=10, fontweight='bold')
-    axs[2].set_xlabel("Time of Day", fontsize=8, fontweight='bold')
-    axs[2].set_ylabel("Utilization (%)", fontsize=8, fontweight='bold')
-    axs[2].xaxis.set_major_formatter(FuncFormatter(time_formatter))
-    axs[2].set_xlim(0, SIM_TIME)
-    axs[2].axvline(x=RUSH_HOUR_START, color='orange', linestyle='--', linewidth=1, label='Rush Hour Start')
-    axs[2].axvline(x=RUSH_HOUR_END, color='purple', linestyle='--', linewidth=1, label='Rush Hour End')
-    axs[2].legend(loc="upper right", bbox_to_anchor=(1.1, 1), fontsize="x-small")
+    axs[1].tick_params(axis='both', labelsize=10)  # Larger tick labels
+    axs[1].axvline(x=RUSH_HOUR_START, color='orange', linestyle='--', linewidth=1, label='Rush Start')  # Vertical line for Rush Start
+    axs[1].axvline(x=RUSH_HOUR_END, color='purple', linestyle='--', linewidth=1, label='Rush End')  # Vertical line for Rush End
+    axs[1].legend(loc="upper right", fontsize=8)  # Simple legend with only the labels
 
     plt.tight_layout()
     plt.show()
+
+
+
+
+
 
